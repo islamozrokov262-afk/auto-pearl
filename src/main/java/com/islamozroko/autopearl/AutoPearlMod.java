@@ -5,6 +5,8 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.EnderpearlItem;
 import net.minecraft.world.item.ItemStack;
@@ -18,6 +20,7 @@ public class AutoPearlMod implements ClientModInitializer {
     private static int postPearlTicks = 0;
     private static float originalYaw = 0;
     private static float originalPitch = 0;
+    private static float targetYaw = 0;
 
     @Override
     public void onInitializeClient() {
@@ -62,14 +65,11 @@ public class AutoPearlMod implements ClientModInitializer {
                 originalYaw = client.player.getYRot();
                 originalPitch = client.player.getXRot();
                 
-                // Вычисляем угол до врага
                 double dx = nearestEnemy.getX() - client.player.getX();
                 double dz = nearestEnemy.getZ() - client.player.getZ();
                 float yawToEnemy = (float) (Math.atan2(dz, dx) * 180.0 / Math.PI) - 90.0f;
                 
-                // Разворачиваем на 180 градусов и поднимаем камеру на 30 градусов
-                client.player.setYRot(yawToEnemy + 180.0f);
-                client.player.setXRot(-30.0f); 
+                targetYaw = yawToEnemy + 180.0f;
                 
                 isSwapping = true;
                 state = 0;
@@ -80,54 +80,56 @@ public class AutoPearlMod implements ClientModInitializer {
     private void handleSwapProcess(Minecraft client) {
         if (client.player == null) return;
 
-        // Шаг 0: Нажимаем R (выключаем килку)
+        // Шаг 0: Выключаем килку (клик R) и разворачиваемся
         if (state == 0) {
+            // Клик R (нажали и отпустили в одном тике)
             setKeyPressed(config.auraKeyCode, true);
-            holdTicks = 2;
+            setKeyPressed(config.auraKeyCode, false);
+            
+            client.player.setYRot(targetYaw);
+            client.player.setXRot(-30.0f);
+            
+            holdTicks = 2; // Ждем 2 тика, чтобы килка точно вырубилась
             state = 1;
         } 
-        // Шаг 1: Отпускаем R, свапаем слот, кидаем перл
+        // Шаг 1: Отправляем пакет перла (В ОБХОД ВУЙДА)
         else if (state == 1) {
             if (holdTicks > 0) {
                 holdTicks--;
+                // Все еще держим камеру назад
+                client.player.setYRot(targetYaw);
+                client.player.setXRot(-30.0f);
                 return;
             }
-            setKeyPressed(config.auraKeyCode, false);
             
+            // Свапаем слот
             client.player.getInventory().setSelectedSlot(config.pearlSlot);
-            client.options.keyUse.setDown(true);
+            
+            // Отправляем пакет использования предмета НАПРЯМУЮ (ПКМ)
+            if (client.getConnection() != null) {
+                client.getConnection().send(new ServerboundUseItemPacket(InteractionHand.MAIN_HAND, 0, targetYaw, -30.0f));
+            }
+            
+            postPearlTicks = 10; // Ждем, пока перл долетит
             state = 2;
         }
-        // Шаг 2: Отпускаем ПКМ, возвращаем камеру
+        // Шаг 2: Возвращаем камеру и включаем килку
         else if (state == 2) {
-            client.options.keyUse.setDown(false);
-            client.player.setYRot(originalYaw);
-            client.player.setXRot(originalPitch);
-            
-            // Ждем 10 тиков (0.5 секунды), чтобы перл долетел
-            postPearlTicks = 10; 
-            state = 3;
-        }
-        // Шаг 3: Ждем, пока перл долетит, и только потом включаем килку
-        else if (state == 3) {
             if (postPearlTicks > 0) {
                 postPearlTicks--;
                 return;
             }
             
+            // Возвращаем камеру
+            client.player.setYRot(originalYaw);
+            client.player.setXRot(originalPitch);
+            
+            // Включаем килку обратно (клик R)
             setKeyPressed(config.auraKeyCode, true);
-            holdTicks = 2;
-            state = 4;
-        }
-        // Шаг 4: Отпускаем R и завершаем
-        else if (state == 4) {
-            if (holdTicks > 0) {
-                holdTicks--;
-                return;
-            }
             setKeyPressed(config.auraKeyCode, false);
+            
             isSwapping = false;
-            cooldown = 60; // Кулдаун 3 секунды
+            cooldown = 60;
         }
     }
 
