@@ -1,10 +1,9 @@
 package com.islamozroko.autopearl;
 
-import com.mojang.blaze3d.platform.InputConstants;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Player;
@@ -17,9 +16,6 @@ public class AutoPearlMod implements ClientModInitializer {
     private static boolean isSwapping = false;
     private static int state = 0;
     private static int holdTicks = 0;
-    private static int postPearlTicks = 0;
-    private static float originalYaw = 0;
-    private static float originalPitch = 0;
     private static float targetYaw = 0;
 
     @Override
@@ -62,14 +58,11 @@ public class AutoPearlMod implements ClientModInitializer {
 
             ItemStack stack = client.player.getInventory().getItem(config.pearlSlot);
             if (stack.getItem() instanceof EnderpearlItem) {
-                originalYaw = client.player.getYRot();
-                originalPitch = client.player.getXRot();
-                
                 double dx = nearestEnemy.getX() - client.player.getX();
                 double dz = nearestEnemy.getZ() - client.player.getZ();
                 float yawToEnemy = (float) (Math.atan2(dz, dx) * 180.0 / Math.PI) - 90.0f;
                 
-                targetYaw = yawToEnemy + 180.0f;
+                targetYaw = yawToEnemy + 180.0f; // Разворот на 180
                 
                 isSwapping = true;
                 state = 0;
@@ -78,58 +71,35 @@ public class AutoPearlMod implements ClientModInitializer {
     }
 
     private void handleSwapProcess(Minecraft client) {
-        if (client.player == null) return;
+        if (client.player == null || client.getConnection() == null) return;
 
-        // Шаг 0: Выключаем килку и разворачиваемся
+        // Шаг 0: Отправляем серверу пакет, что мы развернулись (камера на клиенте не меняется!)
         if (state == 0) {
-            setKeyPressed(config.auraKeyCode, true);
-            setKeyPressed(config.auraKeyCode, false);
+            // Отправляем фейковый пакет поворота
+            client.getConnection().send(new ServerboundMovePlayerPacket.Rot(targetYaw, -5.0f, client.player.onGround()));
             
-            client.player.setYRot(targetYaw);
-            client.player.setXRot(-5.0f); // Угол 5 градусов (почти прямо, летит недалеко)
+            // Свапаем слот
+            client.player.getInventory().setSelectedSlot(config.pearlSlot);
             
-            holdTicks = 2;
+            holdTicks = 1;
             state = 1;
         } 
-        // Шаг 1: Отправляем пакет перла
+        // Шаг 1: Кидаем перл
         else if (state == 1) {
             if (holdTicks > 0) {
                 holdTicks--;
-                client.player.setYRot(targetYaw);
-                client.player.setXRot(-5.0f);
                 return;
             }
             
-            client.player.getInventory().setSelectedSlot(config.pearlSlot);
+            // Отправляем пакет использования предмета (ПКМ)
+            client.getConnection().send(new ServerboundUseItemPacket(InteractionHand.MAIN_HAND, 0, targetYaw, -5.0f));
             
-            if (client.getConnection() != null) {
-                client.getConnection().send(new ServerboundUseItemPacket(InteractionHand.MAIN_HAND, 0, targetYaw, -5.0f));
-            }
-            
-            postPearlTicks = 10;
-            state = 2;
-        }
-        // Шаг 2: Возвращаем камеру и включаем килку
-        else if (state == 2) {
-            if (postPearlTicks > 0) {
-                postPearlTicks--;
-                return;
-            }
-            
-            client.player.setYRot(originalYaw);
-            client.player.setXRot(originalPitch);
-            
-            setKeyPressed(config.auraKeyCode, true);
-            setKeyPressed(config.auraKeyCode, false);
+            // Возвращаем камеру серверу обратно
+            client.getConnection().send(new ServerboundMovePlayerPacket.Rot(client.player.getYRot(), client.player.getXRot(), client.player.onGround()));
             
             isSwapping = false;
             cooldown = 60;
         }
-    }
-
-    private void setKeyPressed(int keyCode, boolean pressed) {
-        KeyMapping.set(InputConstants.Type.KEYSYM.getOrCreate(keyCode), pressed);
-        KeyMapping.click(InputConstants.Type.KEYSYM.getOrCreate(keyCode));
     }
 
     public static AutoPearlConfig getConfig() {
