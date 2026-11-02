@@ -80,37 +80,33 @@ public class AutoPearlMod implements ClientModInitializer {
     private void handleSwapProcess(Minecraft client) {
         if (client.player == null) return;
 
-        // Шаг 0: Выключаем килку (клик R) и разворачиваемся
+        // Шаг 0: Выключаем килку и разворачиваемся
         if (state == 0) {
-            // Клик R (нажали и отпустили в одном тике)
             setKeyPressed(config.auraKeyCode, true);
             setKeyPressed(config.auraKeyCode, false);
             
             client.player.setYRot(targetYaw);
-            client.player.setXRot(-30.0f);
+            client.player.setXRot(-5.0f); // Угол 5 градусов (почти прямо, летит недалеко)
             
-            holdTicks = 2; // Ждем 2 тика, чтобы килка точно вырубилась
+            holdTicks = 2;
             state = 1;
         } 
-        // Шаг 1: Отправляем пакет перла (В ОБХОД ВУЙДА)
+        // Шаг 1: Отправляем пакет перла
         else if (state == 1) {
             if (holdTicks > 0) {
                 holdTicks--;
-                // Все еще держим камеру назад
                 client.player.setYRot(targetYaw);
-                client.player.setXRot(-30.0f);
+                client.player.setXRot(-5.0f);
                 return;
             }
             
-            // Свапаем слот
             client.player.getInventory().setSelectedSlot(config.pearlSlot);
             
-            // Отправляем пакет использования предмета НАПРЯМУЮ (ПКМ)
             if (client.getConnection() != null) {
-                client.getConnection().send(new ServerboundUseItemPacket(InteractionHand.MAIN_HAND, 0, targetYaw, -30.0f));
+                client.getConnection().send(new ServerboundUseItemPacket(InteractionHand.MAIN_HAND, 0, targetYaw, -5.0f));
             }
             
-            postPearlTicks = 10; // Ждем, пока перл долетит
+            postPearlTicks = 10;
             state = 2;
         }
         // Шаг 2: Возвращаем камеру и включаем килку
@@ -120,11 +116,9 @@ public class AutoPearlMod implements ClientModInitializer {
                 return;
             }
             
-            // Возвращаем камеру
             client.player.setYRot(originalYaw);
             client.player.setXRot(originalPitch);
             
-            // Включаем килку обратно (клик R)
             setKeyPressed(config.auraKeyCode, true);
             setKeyPressed(config.auraKeyCode, false);
             
